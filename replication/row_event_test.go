@@ -522,3 +522,487 @@ func (_ *testDecodeSuite) TestParseJsonDecimal(c *C) {
 		c.Assert(rows.Rows[0][1], SimpleDecimalEqualsChecker, decimal.NewFromFloat(101))
 	}
 }
+
+func (_ *testDecodeSuite) TestEnum(c *C) {
+	// mysql> desc aenum;
+	// +-------+-------------------------------------------+------+-----+---------+-------+
+	// | Field | Type                                      | Null | Key | Default | Extra |
+	// +-------+-------------------------------------------+------+-----+---------+-------+
+	// | id    | int(11)                                   | YES  |     | NULL    |       |
+	// | aset  | enum('0','1','2','3','4','5','6','7','8') | YES  |     | NULL    |       |
+	// +-------+-------------------------------------------+------+-----+---------+-------+
+	// 2 rows in set (0.00 sec)
+	//
+	// insert into aenum(id, aset) values(1, '0');
+	tableMapEventData := []byte("\x42\x0f\x00\x00\x00\x00\x01\x00\x05\x74\x74\x65\x73\x74\x00\x05")
+	tableMapEventData = append(tableMapEventData, []byte("\x61\x65\x6e\x75\x6d\x00\x02\x03\xfe\x02\xf7\x01\x03")...)
+	tableMapEvent := new(TableMapEvent)
+	tableMapEvent.tableIDSize = 6
+	err := tableMapEvent.Decode(tableMapEventData)
+	c.Assert(err, IsNil)
+
+	rows := new(RowsEvent)
+	rows.tableIDSize = 6
+	rows.tables = make(map[uint64]*TableMapEvent)
+	rows.tables[tableMapEvent.TableID] = tableMapEvent
+	rows.Version = 2
+
+	data := []byte("\x42\x0f\x00\x00\x00\x00\x01\x00\x02\x00\x02\xff\xfc\x01\x00\x00\x00\x01")
+
+	rows.Rows = nil
+	err = rows.Decode(data)
+	c.Assert(err, IsNil)
+	c.Assert(rows.Rows[0][1], Equals, int64(1))
+}
+
+func (_ *testDecodeSuite) TestMultiBytesEnum(c *C) {
+	// CREATE TABLE numbers (
+	// 	id int auto_increment,
+	// 	num ENUM( '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '30', '31', '32', '33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46', '47', '48', '49', '50', '51', '52', '53', '54', '55', '56', '57', '58', '59', '60', '61', '62', '63', '64', '65', '66', '67', '68', '69', '70', '71', '72', '73', '74', '75', '76', '77', '78', '79', '80', '81', '82', '83', '84', '85', '86', '87', '88', '89', '90', '91', '92', '93', '94', '95', '96', '97', '98', '99', '100', '101', '102', '103', '104', '105', '106', '107', '108', '109', '110', '111', '112', '113', '114', '115', '116', '117', '118', '119', '120', '121', '122', '123', '124', '125', '126', '127', '128', '129', '130', '131', '132', '133', '134', '135', '136', '137', '138', '139', '140', '141', '142', '143', '144', '145', '146', '147', '148', '149', '150', '151', '152', '153', '154', '155', '156', '157', '158', '159', '160', '161', '162', '163', '164', '165', '166', '167', '168', '169', '170', '171', '172', '173', '174', '175', '176', '177', '178', '179', '180', '181', '182', '183', '184', '185', '186', '187', '188', '189', '190', '191', '192', '193', '194', '195', '196', '197', '198', '199', '200', '201', '202', '203', '204', '205', '206', '207', '208', '209', '210', '211', '212', '213', '214', '215', '216', '217', '218', '219', '220', '221', '222', '223', '224', '225', '226', '227', '228', '229', '230', '231', '232', '233', '234', '235', '236', '237', '238', '239', '240', '241', '242', '243', '244', '245', '246', '247', '248', '249', '250', '251', '252', '253', '254', '255','256','257'
+
+	// ),
+	// primary key(id)
+	// );
+
+	//
+	// insert into numbers(num) values ('0'), ('256');
+	tableMapEventData := []byte("\x84\x0f\x00\x00\x00\x00\x01\x00\x05\x74\x74\x65\x73\x74\x00\x07")
+	tableMapEventData = append(tableMapEventData, []byte("\x6e\x75\x6d\x62\x65\x72\x73\x00\x02\x03\xfe\x02\xf7\x02\x02")...)
+	tableMapEvent := new(TableMapEvent)
+	tableMapEvent.tableIDSize = 6
+	err := tableMapEvent.Decode(tableMapEventData)
+	c.Assert(err, IsNil)
+
+	rows := new(RowsEvent)
+	rows.tableIDSize = 6
+	rows.tables = make(map[uint64]*TableMapEvent)
+	rows.tables[tableMapEvent.TableID] = tableMapEvent
+	rows.Version = 2
+
+	data := []byte("\x84\x0f\x00\x00\x00\x00\x01\x00\x02\x00\x02\xff\xfc\x01\x00\x00\x00\x01\x00\xfc\x02\x00\x00\x00\x01\x01")
+
+	rows.Rows = nil
+	err = rows.Decode(data)
+	c.Assert(err, IsNil)
+	c.Assert(rows.Rows[0][1], Equals, int64(1))
+	c.Assert(rows.Rows[1][1], Equals, int64(257))
+}
+
+func (_ *testDecodeSuite) TestSet(c *C) {
+	// mysql> desc aset;
+	// +--------+---------------------------------------------------------------------------------------+------+-----+---------+-------+
+	// | Field  | Type                                                                                  | Null | Key | Default | Extra |
+	// +--------+---------------------------------------------------------------------------------------+------+-----+---------+-------+
+	// | id     | int(11)                                                                               | YES  |     | NULL    |       |
+	// | region | set('1','2','3','4','5','6','7','8','9','10','11','12','13','14','15','16','17','18') | YES  |     | NULL    |       |
+	// +--------+---------------------------------------------------------------------------------------+------+-----+---------+-------+
+	// 2 rows in set (0.00 sec)
+	//
+	// insert into aset(id, region) values(1, '1,3');
+
+	tableMapEventData := []byte("\xe7\x0e\x00\x00\x00\x00\x01\x00\x05\x74\x74\x65\x73\x74\x00\x04")
+	tableMapEventData = append(tableMapEventData, []byte("\x61\x73\x65\x74\x00\x02\x03\xfe\x02\xf8\x03\x03")...)
+	tableMapEvent := new(TableMapEvent)
+	tableMapEvent.tableIDSize = 6
+	err := tableMapEvent.Decode(tableMapEventData)
+	c.Assert(err, IsNil)
+
+	rows := new(RowsEvent)
+	rows.tableIDSize = 6
+	rows.tables = make(map[uint64]*TableMapEvent)
+	rows.tables[tableMapEvent.TableID] = tableMapEvent
+	rows.Version = 2
+
+	data := []byte("\xe7\x0e\x00\x00\x00\x00\x01\x00\x02\x00\x02\xff\xfc\x01\x00\x00\x00\x05\x00\x00")
+
+	rows.Rows = nil
+	err = rows.Decode(data)
+	c.Assert(err, IsNil)
+	c.Assert(rows.Rows[0][1], Equals, int64(5))
+}
+
+func (_ *testDecodeSuite) TestJsonNull(c *C) {
+	// Table:
+	// desc hj_order_preview
+	// +------------------+------------+------+-----+-------------------+----------------+
+	// | Field            | Type       | Null | Key | Default           | Extra          |
+	// +------------------+------------+------+-----+-------------------+----------------+
+	// | id               | int(13)    | NO   | PRI | <null>            | auto_increment |
+	// | buyer_id         | bigint(13) | NO   |     | <null>            |                |
+	// | order_sn         | bigint(13) | NO   |     | <null>            |                |
+	// | order_detail     | json       | NO   |     | <null>            |                |
+	// | is_del           | tinyint(1) | NO   |     | 0                 |                |
+	// | add_time         | int(13)    | NO   |     | <null>            |                |
+	// | last_update_time | timestamp  | NO   |     | CURRENT_TIMESTAMP |                |
+	// +------------------+------------+------+-----+-------------------+----------------+
+	// insert into hj_order_preview
+	// (id, buyer_id, order_sn, is_del, add_time, last_update_time)
+	// values (1, 95891865464386, 13376222192996417, 0, 1479983995, 1479983995)
+
+	tableMapEventData := []byte("r\x00\x00\x00\x00\x00\x01\x00\x04test\x00\x10hj_order_preview\x00\a\x03\b\b\xf5\x01\x03\x11\x02\x04\x00\x00")
+
+	tableMapEvent := new(TableMapEvent)
+	tableMapEvent.tableIDSize = 6
+	err := tableMapEvent.Decode(tableMapEventData)
+	c.Assert(err, IsNil)
+
+	rows := new(RowsEvent)
+	rows.tableIDSize = 6
+	rows.tables = make(map[uint64]*TableMapEvent)
+	rows.tables[tableMapEvent.TableID] = tableMapEvent
+	rows.Version = 2
+
+	data :=
+		[]byte("r\x00\x00\x00\x00\x00\x01\x00\x02\x00\a\xff\x80\x01\x00\x00\x00B\ue4d06W\x00\x00A\x10@l\x9a\x85/\x00\x00\x00\x00\x00\x00{\xc36X\x00\x00\x00\x00")
+
+	rows.Rows = nil
+	err = rows.Decode(data)
+	c.Assert(err, IsNil)
+	c.Assert(rows.Rows[0][3], HasLen, 0)
+}
+
+func (_ *testDecodeSuite) TestJsonCompatibility(c *C) {
+	// Table:
+	// mysql> desc t11;
+	// +----------+--------------+------+-----+---------+-------------------+
+	// | Field    | Type         | Null | Key | Default | Extra             |
+	// +----------+--------------+------+-----+---------+-------------------+
+	// | id       | int(11)      | YES  |     | NULL    |                   |
+	// | cfg      | varchar(100) | YES  |     | NULL    |                   |
+	// | cfg_json | json         | YES  |     | NULL    | VIRTUAL GENERATED |
+	// | age      | int(11)      | YES  |     | NULL    |                   |
+	// +----------+--------------+------+-----+---------+-------------------+
+	// mysql> insert into t11(id, cfg) values (1, '{}');
+
+	// test json deserialization
+	// mysql> update t11 set cfg = '{"a":1234}' where id = 1;
+	// mysql> update test set cfg = '{}' where id = 1;
+
+	tableMapEventData := []byte("l\x00\x00\x00\x00\x00\x01\x00\x04test\x00\x03t11\x00\x04\x03\x0f\xf5\x03\x03d\x00\x04\x0f")
+
+	tableMapEvent := new(TableMapEvent)
+	tableMapEvent.tableIDSize = 6
+	err := tableMapEvent.Decode(tableMapEventData)
+	c.Assert(err, IsNil)
+
+	rows := new(RowsEvent)
+	rows.tableIDSize = 6
+	rows.tables = make(map[uint64]*TableMapEvent)
+	rows.tables[tableMapEvent.TableID] = tableMapEvent
+	rows.Version = 2
+
+	data := []byte("l\x00\x00\x00\x00\x00\x01\x00\x02\x00\x04\xff\xf8\x01\x00\x00\x00\x02{}\x05\x00\x00\x00\x00\x00\x00\x04\x00")
+	rows.Rows = nil
+	err = rows.Decode(data)
+	c.Assert(err, IsNil)
+	c.Assert(rows.Rows[0][2], DeepEquals, []uint8("{}"))
+
+	// after MySQL 5.7.22
+	data = []byte("l\x00\x00\x00\x00\x00\x01\x00\x02\x00\x04\xff\xff\xf8\x01\x00\x00\x00\x02{}\x05\x00\x00\x00\x00\x00\x00\x04\x00\xf8\x01\x00\x00\x00\n{\"a\":1234}\r\x00\x00\x00\x00\x01\x00\x0c\x00\x0b\x00\x01\x00\x05\xd2\x04a")
+	rows.Rows = nil
+	err = rows.Decode(data)
+	c.Assert(err, IsNil)
+	c.Assert(rows.Rows[1][2], DeepEquals, []uint8("{}"))
+	c.Assert(rows.Rows[2][2], DeepEquals, []uint8("{\"a\":1234}"))
+
+	data = []byte("l\x00\x00\x00\x00\x00\x01\x00\x02\x00\x04\xff\xff\xf8\x01\x00\x00\x00\n{\"a\":1234}\r\x00\x00\x00\x00\x01\x00\x0c\x00\x0b\x00\x01\x00\x05\xd2\x04a\xf8\x01\x00\x00\x00\x02{}\x05\x00\x00\x00\x00\x00\x00\x04\x00")
+	rows.Rows = nil
+	err = rows.Decode(data)
+	c.Assert(err, IsNil)
+	c.Assert(rows.Rows[1][2], DeepEquals, []uint8("{\"a\":1234}"))
+	c.Assert(rows.Rows[2][2], DeepEquals, []uint8("{}"))
+
+	// before MySQL 5.7.22
+	rows.ignoreJSONDecodeErr = true
+	data = []byte("l\x00\x00\x00\x00\x00\x01\x00\x02\x00\x04\xff\xff\xf8\x01\x00\x00\x00\x02{}\x05\x00\x00\x00\x00\x01\x00\x0c\x00\xf8\x01\x00\x00\x00\n{\"a\":1234}\r\x00\x00\x00\x00\x01\x00\x0c\x00\x0b\x00\x01\x00\x05\xd2\x04a")
+	rows.Rows = nil
+	err = rows.Decode(data)
+	c.Assert(err, IsNil)
+	c.Assert(rows.Rows[1][2], DeepEquals, []uint8("null"))
+	c.Assert(rows.Rows[2][2], DeepEquals, []uint8("{\"a\":1234}"))
+
+	rows.ignoreJSONDecodeErr = false
+	data = []byte("l\x00\x00\x00\x00\x00\x01\x00\x02\x00\x04\xff\xff\xf8\x01\x00\x00\x00\n{\"a\":1234}\r\x00\x00\x00\x00\x00\x00\x04\x00\x00\x00\x01\x00\x05\xd2\x04a\xf8\x01\x00\x00\x00\x02{}\x05\x00\x00\x00\x00\x00\x00\x04\x00")
+	rows.Rows = nil
+	err = rows.Decode(data)
+	c.Assert(err, IsNil)
+	// this value is wrong in binlog, but can be parsed without error
+	c.Assert(rows.Rows[1][2], DeepEquals, []uint8("{}"))
+	c.Assert(rows.Rows[2][2], DeepEquals, []uint8("{}"))
+}
+
+func (_ *testDecodeSuite) TestDecodeDatetime2(c *C) {
+	testcases := []struct {
+		data        []byte
+		dec         uint16
+		getFracTime bool
+		expected    string
+	}{
+		{[]byte("\xfe\xf3\xff\x7e\xfb"), 0, true, "9999-12-31 23:59:59"},
+		{[]byte("\x99\x9a\xb8\xf7\xaa"), 0, true, "2016-10-28 15:30:42"},
+		{[]byte("\x99\x02\xc2\x00\x00"), 0, true, "1970-01-01 00:00:00"},
+		{[]byte("\x80\x00\x00\x00\x00"), 0, false, "0000-00-00 00:00:00"},
+		{[]byte("\x80\x00\x02\xf1\x05"), 0, false, "0000-00-01 15:04:05"},
+		{[]byte("\x80\x03\x82\x00\x00"), 0, false, "0001-01-01 00:00:00"},
+		{[]byte("\x80\x03\x82\x00\x00\x0c"), uint16(2), false, "0001-01-01 00:00:00.12"},
+		{[]byte("\x80\x03\x82\x00\x00\x04\xd3"), uint16(4), false, "0001-01-01 00:00:00.1235"},
+		{[]byte("\x80\x03\x82\x00\x00\x01\xe2\x40"), uint16(6), false, "0001-01-01 00:00:00.123456"},
+	}
+	for _, tc := range testcases {
+		value, _, err := decodeDatetime2(tc.data, tc.dec)
+		c.Assert(err, IsNil)
+		switch t := value.(type) {
+		case fracTime:
+			c.Assert(tc.getFracTime, IsTrue)
+			c.Assert(t.String(), Equals, tc.expected)
+		case string:
+			c.Assert(tc.getFracTime, IsFalse)
+			c.Assert(t, Equals, tc.expected)
+		default:
+			c.Errorf("invalid value type: %T", value)
+		}
+	}
+}
+
+func (_ *testDecodeSuite) TestTableMapNullable(c *C) {
+	/*
+		create table _null (c1 int null, c2 int not null default '2', c3 timestamp default now(), c4 text);
+	*/
+	nullables := []bool{true, false, false, true}
+	testcases := [][]byte{
+		// mysql 5.7
+		[]byte("z\x00\x00\x00\x00\x00\x01\x00\x04test\x00\x05_null\x00\x04\x03\x03\x11\xfc\x02\x00\x02\t"),
+		// mysql 8.0
+		[]byte("z\x00\x00\x00\x00\x00\x01\x00\x04test\x00\x05_null\x00\x04\x03\x03\x11\xfc\x02\x00\x02\t\x01\x01\x00\x02\x01\xe0\x04\f\x02c1\x02c2\x02c3\x02c4"),
+		// mariadb 10.4
+		[]byte("\x1e\x00\x00\x00\x00\x00\x01\x00\x04test\x00\x05_null\x00\x04\x03\x03\x11\xfc\x02\x00\x02\t"),
+		// mariadb 10.5
+		[]byte("\x1d\x00\x00\x00\x00\x00\x01\x00\x04test\x00\x05_null\x00\x04\x03\x03\x11\xfc\x02\x00\x02\t\x01\x01\x00\x02\x01\xe0\x04\f\x02c1\x02c2\x02c3\x02c4"),
+	}
+
+	for _, tc := range testcases {
+		tableMapEvent := new(TableMapEvent)
+		tableMapEvent.tableIDSize = 6
+		err := tableMapEvent.Decode(tc)
+		c.Assert(err, IsNil)
+		c.Assert(int(tableMapEvent.ColumnCount), Equals, len(nullables))
+		for i := 0; i < int(tableMapEvent.ColumnCount); i++ {
+			available, nullable := tableMapEvent.Nullable(i)
+			c.Assert(available, Equals, true)
+			c.Assert(nullable, Equals, nullables[i])
+		}
+	}
+}
+
+func (_ *testDecodeSuite) TestTableMapOptMetaNames(c *C) {
+	/*
+		CREATE TABLE `_types` (
+			`b_bit` bit(64) NOT NULL DEFAULT b'0',
+
+			`n_boolean` boolean not null default '0',
+			`n_tinyint` tinyint not null default '0',
+			`n_smallint` smallint not null default '0',
+			`n_mediumint` mediumint not null default '0',
+			`n_int` int not null default '0',
+			`n_bigint` bigint not null default '0',
+			`n_decimal` decimal(65,30) not null default '0',
+			`n_float` float not null default '0',
+			`n_double` double not null default '0',
+
+			`nu_tinyint` tinyint unsigned not null default '0',
+			`nu_smallint` smallint unsigned not null default '0',
+			`nu_mediumint` mediumint unsigned not null default '0',
+			`nu_int` int unsigned not null default '0',
+			`nu_bigint` bigint unsigned not null default '0',
+			`nu_decimal` decimal(65,30) unsigned not null default '0',
+			`nu_float` float unsigned not null default '0',
+			`nu_double` double unsigned not null default '0',
+
+			`t_year` year default null,
+			`t_date` date default null,
+			`t_time` time default null,
+			`t_ftime` time(6) default null,
+			`t_datetime` datetime default null,
+			`t_fdatetime` datetime(6) default null,
+			`t_timestamp` timestamp default current_timestamp,
+			`t_ftimestamp` timestamp(6) default current_timestamp(6),
+
+			`c_char` char(255) not null default '',
+			`c_varchar` varchar(255) not null default '',
+			`c_binary` binary(64) not null default '',
+			`c_varbinary` varbinary(64) not null default '',
+			`c_tinyblob` tinyblob,
+			`c_blob` blob,
+			`c_mediumblob` mediumblob,
+			`c_longblob` longblob,
+			`c_tinytext` tinytext,
+			`c_text` text,
+			`c_mediumtext` mediumtext,
+			`c_longtext` longtext,
+
+			`e_enum` enum('a','b') default 'a',
+			`s_set` set('1','2') default '1',
+			`g_geometry` geometry DEFAULT NULL,
+			`j_json` json DEFAULT NULL
+		);
+		insert into _types values ();
+	*/
+	colNames := []string{
+		"b_bit",
+		"n_boolean",
+		"n_tinyint",
+		"n_smallint",
+		"n_mediumint",
+		"n_int",
+		"n_bigint",
+		"n_decimal",
+		"n_float",
+		"n_double",
+		"nu_tinyint",
+		"nu_smallint",
+		"nu_mediumint",
+		"nu_int",
+		"nu_bigint",
+		"nu_decimal",
+		"nu_float",
+		"nu_double",
+		"t_year",
+		"t_date",
+		"t_time",
+		"t_ftime",
+		"t_datetime",
+		"t_fdatetime",
+		"t_timestamp",
+		"t_ftimestamp",
+		"c_char",
+		"c_varchar",
+		"c_binary",
+		"c_varbinary",
+		"c_tinyblob",
+		"c_blob",
+		"c_mediumblob",
+		"c_longblob",
+		"c_tinytext",
+		"c_text",
+		"c_mediumtext",
+		"c_longtext",
+		"e_enum",
+		"s_set",
+		"g_geometry",
+		"j_json",
+	}
+	enumVals := [][]string{{"a", "b"}}
+	setVals := [][]string{{"1", "2"}}
+
+	testcases := []struct {
+		data     []byte
+		hasNames bool
+	}{
+		// mysql 5.7
+		{data: []byte("u\x00\x00\x00\x00\x00\x01\x00\x04test\x00\x06_types\x00*\x10\x01\x01\x02\t\x03\b\xf6\x04\x05\x01\x02\t\x03\b\xf6\x04\x05\r\n\x13\x13\x12\x12\x11\x11\xfe\x0f\xfe\x0f\xfc\xfc\xfc\xfc\xfc\xfc\xfc\xfc\xfe\xfe\xff\xf5&\x00\bA\x1e\x04\bA\x1e\x04\b\x00\x06\x00\x06\x00\x06\xce\xfc\xfc\x03\xfe@@\x00\x01\x02\x03\x04\x01\x02\x03\x04\xf7\x01\xf8\x01\x04\x04\x00\x00\xfc\xc0\xff\x03")},
+		// mysql 8.0
+		{data: []byte("j\x00\x00\x00\x00\x00\x01\x00\x04test\x00\x06_types\x00*\x10\x01\x01\x02\t\x03\b\xf6\x04\x05\x01\x02\t\x03\b\xf6\x04\x05\r\n\x13\x13\x12\x12\x11\x11\xfe\x0f\xfe\x0f\xfc\xfc\xfc\xfc\xfc\xfc\xfc\xfc\xfe\xfe\xff\xf5&\x00\bA\x1e\x04\bA\x1e\x04\b\x00\x06\x00\x06\x00\x06\xce\xfc\xfc\x03\xfe@@\x00\x01\x02\x03\x04\x01\x02\x03\x04\xf7\x01\xf8\x01\x04\x04\x00\x00\xfc\xc3\xff\x03\x01\x03\x00\u007f\x80\x03\f\xe0\xe0??????\xe0\xe0\xe0\xe0\a\x01\x00\x04\xfc\x94\x01\x05b_bit\tn_boolean\tn_tinyint\nn_smallint\vn_mediumint\x05n_int\bn_bigint\tn_decimal\an_float\bn_double\nnu_tinyint\vnu_smallint\fnu_mediumint\x06nu_int\tnu_bigint\nnu_decimal\bnu_float\tnu_double\x06t_year\x06t_date\x06t_time\at_ftime\nt_datetime\vt_fdatetime\vt_timestamp\ft_ftimestamp\x06c_char\tc_varchar\bc_binary\vc_varbinary\nc_tinyblob\x06c_blob\fc_mediumblob\nc_longblob\nc_tinytext\x06c_text\fc_mediumtext\nc_longtext\x06e_enum\x05s_set\ng_geometry\x06j_json\n\x01\xe0\x05\x05\x02\x011\x012\x06\x05\x02\x01a\x01b"), hasNames: true},
+		// mariadb 10.4
+		{data: []byte("\x1b\x00\x00\x00\x00\x00\x01\x00\x04test\x00\x06_types\x00*\x10\x01\x01\x02\t\x03\b\xf6\x04\x05\x01\x02\t\x03\b\xf6\x04\x05\r\n\x13\x13\x12\x12\x11\x11\xfe\x0f\xfe\x0f\xfc\xfc\xfc\xfc\xfc\xfc\xfc\xfc\xfe\xfe\xff\xfc&\x00\bA\x1e\x04\bA\x1e\x04\b\x00\x06\x00\x06\x00\x06\xce\xfc\xfc\x03\xfe@@\x00\x01\x02\x03\x04\x01\x02\x03\x04\xf7\x01\xf8\x01\x04\x04\x00\x00\xfc\xc0\xff\x03")},
+		// mariadb 10.5
+		{data: []byte("\x1a\x00\x00\x00\x00\x00\x01\x00\x04test\x00\x06_types\x00*\x10\x01\x01\x02\t\x03\b\xf6\x04\x05\x01\x02\t\x03\b\xf6\x04\x05\r\n\x13\x13\x12\x12\x11\x11\xfe\x0f\xfe\x0f\xfc\xfc\xfc\xfc\xfc\xfc\xfc\xfc\xfe\xfe\xff\xfc&\x00\bA\x1e\x04\bA\x1e\x04\b\x00\x06\x00\x06\x00\x06\xce\xfc\xfc\x03\xfe@@\x00\x01\x02\x03\x04\x01\x02\x03\x04\xf7\x01\xf8\x01\x04\x04\x00\x00\xfc\xc0\xff\x03\x01\x03\x00\u007f\xc0\x03\x0e\xe0\xe0??????\xe0\xe0\xe0\xe0?.\a\x01\x00\x04\xfc\x94\x01\x05b_bit\tn_boolean\tn_tinyint\nn_smallint\vn_mediumint\x05n_int\bn_bigint\tn_decimal\an_float\bn_double\nnu_tinyint\vnu_smallint\fnu_mediumint\x06nu_int\tnu_bigint\nnu_decimal\bnu_float\tnu_double\x06t_year\x06t_date\x06t_time\at_ftime\nt_datetime\vt_fdatetime\vt_timestamp\ft_ftimestamp\x06c_char\tc_varchar\bc_binary\vc_varbinary\nc_tinyblob\x06c_blob\fc_mediumblob\nc_longblob\nc_tinytext\x06c_text\fc_mediumtext\nc_longtext\x06e_enum\x05s_set\ng_geometry\x06j_json\n\x01\xe0\x05\x05\x02\x011\x012\x06\x05\x02\x01a\x01b"), hasNames: true},
+	}
+
+	for _, tc := range testcases {
+
+		tableMapEvent := new(TableMapEvent)
+		tableMapEvent.tableIDSize = 6
+		err := tableMapEvent.Decode(tc.data)
+		c.Assert(err, IsNil)
+
+		if tc.hasNames {
+			c.Assert(tableMapEvent.ColumnNameString(), DeepEquals, colNames)
+			c.Assert(tableMapEvent.SetStrValueString(), DeepEquals, setVals)
+			c.Assert(tableMapEvent.EnumStrValueString(), DeepEquals, enumVals)
+		} else {
+			c.Assert(tableMapEvent.ColumnNameString(), DeepEquals, []string(nil))
+			c.Assert(tableMapEvent.SetStrValueString(), DeepEquals, [][]string(nil))
+			c.Assert(tableMapEvent.EnumStrValueString(), DeepEquals, [][]string(nil))
+		}
+	}
+
+}
+
+func (_ *testDecodeSuite) TestTableMapOptMetaPrimaryKey(c *C) {
+	/*
+		create table _prim (id2 int, col varchar(30), id1 bigint, primary key (id1, id2));
+	*/
+	case1PrimaryKey := []uint64{2, 0}
+	case1PrimaryKeyPrefix := []uint64{0, 0}
+
+	/*
+		create table _prim2 (col1 int, id1 char(10), col2 int, id2 varchar(20), primary key (id1, id2(10)));
+	*/
+	case2PrimaryKey := []uint64{1, 3}
+	case2PrimaryKeyPrefix := []uint64{0, 10}
+
+	testcases := []struct {
+		data                     []byte
+		expectedPrimaryKey       []uint64
+		expectedPrimaryKeyPrefix []uint64
+	}{
+		{
+			// mysql 5.7, case1
+			data:                     []byte("w\x00\x00\x00\x00\x00\x01\x00\x04test\x00\x05_prim\x00\x03\x03\x0f\b\x02x\x00\x02"),
+			expectedPrimaryKey:       []uint64(nil),
+			expectedPrimaryKeyPrefix: []uint64(nil),
+		},
+		{
+			// mysql 8.0, case1
+			data:                     []byte("l\x00\x00\x00\x00\x00\x01\x00\x04test\x00\x05_prim\x00\x03\x03\x0f\b\x02x\x00\x02\x01\x01\x00\x02\x01\xe0\x04\f\x03id2\x03col\x03id1\b\x02\x02\x00"),
+			expectedPrimaryKey:       case1PrimaryKey,
+			expectedPrimaryKeyPrefix: case1PrimaryKeyPrefix,
+		},
+		{
+			// mariadb 10.4, case1
+			data:                     []byte("\x1c\x00\x00\x00\x00\x00\x01\x00\x04test\x00\x05_prim\x00\x03\x03\x0f\b\x02x\x00\x02"),
+			expectedPrimaryKey:       []uint64(nil),
+			expectedPrimaryKeyPrefix: []uint64(nil),
+		},
+		{
+			// mariadb 10.5, case1
+			data:                     []byte("\x1b\x00\x00\x00\x00\x00\x01\x00\x04test\x00\x05_prim\x00\x03\x03\x0f\b\x02x\x00\x02\x01\x01\x00\x02\x01\xe0\x04\f\x03id2\x03col\x03id1\b\x02\x02\x00"),
+			expectedPrimaryKey:       case1PrimaryKey,
+			expectedPrimaryKeyPrefix: case1PrimaryKeyPrefix,
+		},
+		{
+			// mysql 5.7, case2
+			data:                     []byte("y\x00\x00\x00\x00\x00\x01\x00\x04test\x00\x06_prim2\x00\x04\x03\xfe\x03\x0f\x04\xfe(P\x00\x05"),
+			expectedPrimaryKey:       []uint64(nil),
+			expectedPrimaryKeyPrefix: []uint64(nil),
+		},
+		{
+			// mysql 8.0, case2
+			data:                     []byte("m\x00\x00\x00\x00\x00\x01\x00\x04test\x00\x06_prim2\x00\x04\x03\xfe\x03\x0f\x04\xfe(P\x00\x05\x01\x01\x00\x02\x01\xe0\x04\x12\x04col1\x03id1\x04col2\x03id2\t\x04\x01\x00\x03\n"),
+			expectedPrimaryKey:       case2PrimaryKey,
+			expectedPrimaryKeyPrefix: case2PrimaryKeyPrefix,
+		},
+		{
+			// mariadb 10.4, case2
+			data:                     []byte("\x1d\x00\x00\x00\x00\x00\x01\x00\x04test\x00\x06_prim2\x00\x04\x03\xfe\x03\x0f\x04\xfe(P\x00\x05"),
+			expectedPrimaryKey:       []uint64(nil),
+			expectedPrimaryKeyPrefix: []uint64(nil),
+		},
+		{
+			// mariadb 10.5, case2
+			data:                     []byte("\x1c\x00\x00\x00\x00\x00\x01\x00\x04test\x00\x06_prim2\x00\x04\x03\xfe\x03\x0f\x04\xfe(P\x00\x05\x01\x01\x00\x02\x01\xe0\x04\x12\x04col1\x03id1\x04col2\x03id2\t\x04\x01\x00\x03\n"),
+			expectedPrimaryKey:       case2PrimaryKey,
+			expectedPrimaryKeyPrefix: case2PrimaryKeyPrefix,
+		},
+	}
+
+	for _, tc := range testcases {
+		tableMapEvent := new(TableMapEvent)
+		tableMapEvent.tableIDSize = 6
+		err := tableMapEvent.Decode(tc.data)
+		c.Assert(err, IsNil)
+		c.Assert(tableMapEvent.PrimaryKey, DeepEquals, tc.expectedPrimaryKey)
+		c.Assert(tableMapEvent.PrimaryKeyPrefix, DeepEquals, tc.expectedPrimaryKeyPrefix)
+	}
+
+}

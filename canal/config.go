@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
-	"github.com/juju/errors"
+	"github.com/pingcap/errors"
 	"github.com/siddontang/go-mysql/mysql"
 )
 
@@ -36,6 +36,12 @@ type DumpConfig struct {
 
 	// Set to change the default max_allowed_packet size
 	MaxAllowedPacketMB int `toml:"max_allowed_packet_mb"`
+
+	// Set to change the default protocol to connect with
+	Protocol string `toml:"protocol"`
+
+	// Set extra options
+	ExtraOptions []string `toml:"extra_options"`
 }
 
 type Config struct {
@@ -54,8 +60,8 @@ type Config struct {
 	// eg, IncludeTableRegex : [".*\\.canal"], ExcludeTableRegex : ["mysql\\..*"]
 	//     this will include all database's 'canal' table, except database 'mysql'
 	// Default IncludeTableRegex and ExcludeTableRegex are empty, this will include all tables
-	IncludeTableRegex []string `toml:include_table_regex`
-	ExcludeTableRegex []string `toml:exclude_table_regex`
+	IncludeTableRegex []string `toml:"include_table_regex"`
+	ExcludeTableRegex []string `toml:"exclude_table_regex"`
 
 	// discard row event without table meta
 	DiscardNoMetaRowEvent bool `toml:"discard_no_meta_row_event"`
@@ -63,6 +69,16 @@ type Config struct {
 	Dump DumpConfig `toml:"dump"`
 
 	UseDecimal bool `toml:"use_decimal"`
+	ParseTime  bool `toml:"parse_time"`
+
+	TimestampStringLocation *time.Location
+
+	// SemiSyncEnabled enables semi-sync or not.
+	SemiSyncEnabled bool `toml:"semi_sync_enabled"`
+
+	// Set to change the maximum number of attempts to re-establish a broken
+	// connection
+	MaxReconnectAttempts int `toml:"max_reconnect_attempts"`
 }
 
 func NewConfigWithFile(name string) (*Config, error) {
@@ -93,8 +109,7 @@ func NewDefaultConfig() *Config {
 	c.Password = ""
 
 	c.Charset = mysql.DEFAULT_CHARSET
-	rand.Seed(time.Now().Unix())
-	c.ServerID = uint32(rand.Intn(1000)) + 1001
+	c.ServerID = uint32(rand.New(rand.NewSource(time.Now().Unix())).Intn(1000)) + 1001
 
 	c.Flavor = "mysql"
 

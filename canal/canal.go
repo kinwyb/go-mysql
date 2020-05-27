@@ -9,15 +9,17 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
-	"github.com/juju/errors"
+	"github.com/pingcap/errors"
+	"github.com/pingcap/parser"
+	"github.com/siddontang/go-log/log"
 	"github.com/siddontang/go-mysql/client"
 	"github.com/siddontang/go-mysql/dump"
 	"github.com/siddontang/go-mysql/mysql"
 	"github.com/siddontang/go-mysql/replication"
 	"github.com/siddontang/go-mysql/schema"
-	log "github.com/sirupsen/logrus"
 )
 
 // Canal can sync your MySQL data into everywhere, like Elasticsearch, Redis, etc...
@@ -27,8 +29,7 @@ type Canal struct {
 
 	cfg *Config
 
-	useGTID bool
-
+	parser     *parser.Parser
 	master     *masterInfo
 	dumper     *dump.Dumper
 	dumped     bool
@@ -48,6 +49,8 @@ type Canal struct {
 	includeTableRegex []*regexp.Regexp
 	excludeTableRegex []*regexp.Regexp
 
+	delay *uint32
+
 	ctx    context.Context
 	cancel context.CancelFunc
 }
@@ -64,12 +67,14 @@ func NewCanal(cfg *Config) (*Canal, error) {
 
 	c.dumpDoneCh = make(chan struct{})
 	c.eventHandler = &DummyEventHandler{}
-
+	c.parser = parser.New()
 	c.tables = make(map[string]*schema.Table)
 	if c.cfg.DiscardNoMetaRowEvent {
 		c.errorTablesGetTime = make(map[string]time.Time)
 	}
 	c.master = &masterInfo{}
+
+	c.delay = new(uint32)
 
 	var err error
 
@@ -149,6 +154,10 @@ func (c *Canal) prepareDumper() error {
 	c.dumper.SetWhere(c.cfg.Dump.Where)
 	c.dumper.SkipMasterData(c.cfg.Dump.SkipMasterData)
 	c.dumper.SetMaxAllowedPacket(c.cfg.Dump.MaxAllowedPacketMB)
+	c.dumper.SetProtocol(c.cfg.Dump.Protocol)
+	c.dumper.SetExtraOptions(c.cfg.Dump.ExtraOptions)
+	// Use hex blob for mysqldump
+	c.dumper.SetHexBlob(true)
 
 	for _, ignoreTable := range c.cfg.Dump.IgnoreTables {
 		if seps := strings.Split(ignoreTable, ","); len(seps) == 2 {
@@ -165,6 +174,10 @@ func (c *Canal) prepareDumper() error {
 	return nil
 }
 
+func (c *Canal) GetDelay() uint32 {
+	return atomic.LoadUint32(c.delay)
+}
+
 // Run will first try to dump all data from MySQL master `mysqldump`,
 // then sync from the binlog position in the dump data.
 // It will run forever until meeting an error or Canal closed.
@@ -174,15 +187,13 @@ func (c *Canal) Run() error {
 
 // RunFrom will sync from the binlog position directly, ignore mysqldump.
 func (c *Canal) RunFrom(pos mysql.Position) error {
-	c.useGTID = false
 	c.master.Update(pos)
 
 	return c.Run()
 }
 
 func (c *Canal) StartFromGTID(set mysql.GTIDSet) error {
-	c.useGTID = true
-	c.master.UpdateGTID(set)
+	c.master.UpdateGTIDSet(set)
 
 	return c.Run()
 }
@@ -202,6 +213,8 @@ func (c *Canal) run() error {
 		c.cancel()
 	}()
 
+	c.master.UpdateTimestamp(uint32(time.Now().Unix()))
+
 	if !c.dumped {
 		c.dumped = true
 
@@ -215,8 +228,10 @@ func (c *Canal) run() error {
 	}
 
 	if err := c.runSyncBinlog(); err != nil {
-		log.Errorf("canal start sync binlog err: %v", err)
-		return errors.Trace(err)
+		if errors.Cause(err) != context.Canceled {
+			log.Errorf("canal start sync binlog err: %v", err)
+			return errors.Trace(err)
+		}
 	}
 
 	return nil
@@ -224,18 +239,17 @@ func (c *Canal) run() error {
 
 func (c *Canal) Close() {
 	log.Infof("closing canal")
-
 	c.m.Lock()
 	defer c.m.Unlock()
 
 	c.cancel()
+	c.syncer.Close()
 	c.connLock.Lock()
 	c.conn.Close()
 	c.conn = nil
 	c.connLock.Unlock()
-	c.syncer.Close()
 
-	c.eventHandler.OnPosSynced(c.master.Position(), true)
+	c.eventHandler.OnPosSynced(c.master.Position(), c.master.GTIDSet(), true)
 }
 
 func (c *Canal) WaitDumpDone() <-chan struct{} {
@@ -367,7 +381,7 @@ func (c *Canal) ClearTableCache(db []byte, table []byte) {
 	c.tableLock.Unlock()
 }
 
-// Check MySQL binlog row image, must be in FULL, MINIMAL, NOBLOB
+// CheckBinlogRowImage checks MySQL binlog row image, must be in FULL, MINIMAL, NOBLOB
 func (c *Canal) CheckBinlogRowImage(image string) error {
 	// need to check MySQL binlog row image? full, minimal or noblob?
 	// now only log
@@ -398,27 +412,36 @@ func (c *Canal) checkBinlogRowFormat() error {
 }
 
 func (c *Canal) prepareSyncer() error {
-	seps := strings.Split(c.cfg.Addr, ":")
-	if len(seps) != 2 {
-		return errors.Errorf("invalid mysql addr format %s, must host:port", c.cfg.Addr)
-	}
-
-	port, err := strconv.ParseUint(seps[1], 10, 16)
-	if err != nil {
-		return errors.Trace(err)
-	}
-
 	cfg := replication.BinlogSyncerConfig{
-		ServerID:        c.cfg.ServerID,
-		Flavor:          c.cfg.Flavor,
-		Host:            seps[0],
-		Port:            uint16(port),
-		User:            c.cfg.User,
-		Password:        c.cfg.Password,
-		Charset:         c.cfg.Charset,
-		HeartbeatPeriod: c.cfg.HeartbeatPeriod,
-		ReadTimeout:     c.cfg.ReadTimeout,
-		UseDecimal:      c.cfg.UseDecimal,
+		ServerID:                c.cfg.ServerID,
+		Flavor:                  c.cfg.Flavor,
+		User:                    c.cfg.User,
+		Password:                c.cfg.Password,
+		Charset:                 c.cfg.Charset,
+		HeartbeatPeriod:         c.cfg.HeartbeatPeriod,
+		ReadTimeout:             c.cfg.ReadTimeout,
+		UseDecimal:              c.cfg.UseDecimal,
+		ParseTime:               c.cfg.ParseTime,
+		SemiSyncEnabled:         c.cfg.SemiSyncEnabled,
+		MaxReconnectAttempts:    c.cfg.MaxReconnectAttempts,
+		TimestampStringLocation: c.cfg.TimestampStringLocation,
+	}
+
+	if strings.Contains(c.cfg.Addr, "/") {
+		cfg.Host = c.cfg.Addr
+	} else {
+		seps := strings.Split(c.cfg.Addr, ":")
+		if len(seps) != 2 {
+			return errors.Errorf("invalid mysql addr format %s, must host:port", c.cfg.Addr)
+		}
+
+		port, err := strconv.ParseUint(seps[1], 10, 16)
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		cfg.Host = seps[0]
+		cfg.Port = uint16(port)
 	}
 
 	c.syncer = replication.NewBinlogSyncer(cfg)
@@ -456,4 +479,12 @@ func (c *Canal) Execute(cmd string, args ...interface{}) (rr *mysql.Result, err 
 
 func (c *Canal) SyncedPosition() mysql.Position {
 	return c.master.Position()
+}
+
+func (c *Canal) SyncedTimestamp() uint32 {
+	return c.master.timestamp
+}
+
+func (c *Canal) SyncedGTIDSet() mysql.GTIDSet {
+	return c.master.GTIDSet()
 }
